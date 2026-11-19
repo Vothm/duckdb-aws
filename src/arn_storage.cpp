@@ -49,6 +49,7 @@ static const case_insensitive_map_t<ArnService> &ArnServices() {
 	static const case_insensitive_map_t<ArnService> services {
 	    // The iceberg extension takes the full ARN as its warehouse, and reads endpoint_type
 	    {"s3tables", ArnService {"iceberg", true, {{"endpoint_type", Value("s3_tables")}}}},
+	    {"athena", ArnService {"athena", false, {}}},
 	    {"rds", ArnService {"rds", false, {}}},
 	    // The redshift extension makes no AWS call of its own, so it cannot turn a namespace or workgroup ID into
 	    // the endpoint it names: for those ARNs, ResolveArnById looks the target up and hands the extension a

@@ -1,4 +1,6 @@
 #include "arn_storage.hpp"
+#include "athena/athena_functions.hpp"
+#include "athena/athena_resource.hpp"
 #include "aws_default_secret_storage.hpp"
 #include "aws_secret.hpp"
 #include "aws_extension.hpp"
@@ -87,6 +89,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	S3MetadataFunctions::Register(loader);
 	SystemTablesFunctions::Register(loader);
 	SystemTablesResource::Register(loader);
+
+	AthenaFunctions::Register(loader);
+	AthenaResource::Register(loader);
 }
 
 void AwsExtension::Load(ExtensionLoader &loader) {

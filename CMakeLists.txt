@@ -23,6 +23,8 @@ add_compile_definitions(DUCKDB_AWS_GIT_SHA="${DUCKDB_AWS_GIT_SHA}")
 set(EXTENSION_SOURCES
     src/arn.cpp
     src/arn_storage.cpp
+    src/athena/athena_functions.cpp
+    src/athena/athena_resource.cpp
     src/aws_default_secret_storage.cpp
     src/aws_extension.cpp
     src/aws_http_client.cpp
@@ -66,6 +68,7 @@ find_package(
   COMPONENTS core
              sso
              sts
+             athena
              identity-management
              rds
              redshift

@@ -1,0 +1,144 @@
+# name: test/sql/athena/athena_resource.test
+# description: the athena_workgroups listing function and the aws.athena.workgroup external-resource type, without AWS
+# group: [athena]
+
+require no_extension_autoloading "EXPECTED: Test relies on explicit INSTALL and LOAD"
+
+require httpfs
+
+require aws
+
+statement ok
+CREATE SECRET example_credentials (TYPE aws, KEY_ID 'AKIAIOSFODNN7EXAMPLE', SECRET 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', REGION 'us-east-1');
+
+statement ok
+PREPARE list_workgroups AS SELECT * FROM athena_workgroups();
+
+statement error
+SELECT * FROM athena_workgroups(region := NULL);
+----
+athena_workgroups: region must not be NULL or empty
+
+statement error
+SELECT * FROM athena_workgroups(workgroup := '');
+----
+athena_workgroups: workgroup must not be NULL or empty
+
+query IIIIII
+SELECT name, kind, create_function, status_function, destroy_function, list_function
+FROM duckdb_external_resource_types() WHERE name = 'aws.athena.workgroup';
+----
+aws.athena.workgroup	catalog	__aws__athena__workgroup__create	__aws__athena__workgroup__status	NULL	__aws__athena__workgroup__list
+
+statement error
+CREATE EXTERNAL RESOURCE 'aws.athena.workgroup' AS new_workgroup (REGION 'us-east-1');
+----
+this extension does not create Athena workgroups
+
+statement error
+SELECT * FROM __aws__athena__workgroup__status(MAP {'arn': 'arn:aws:athena:us-east-1:123456789012:datacatalog/AwsDataCatalog'});
+----
+expected an ARN of the form 'arn:<partition>:athena:<region>:<account>:workgroup/<name>'
+
+statement error
+SELECT * FROM __aws__athena__workgroup__status(MAP {'arn': 'arn:aws:athena::123456789012:workgroup/primary'});
+----
+expected an ARN of the form 'arn:<partition>:athena:<region>:<account>:workgroup/<name>'
+
+statement error
+SELECT * FROM __aws__athena__workgroup__status(MAP {'arn': 'arn:aws:athena:us-east-1::workgroup/primary'});
+----
+expected an ARN of the form 'arn:<partition>:athena:<region>:<account>:workgroup/<name>'
+
+statement ok
+CREATE TABLE workgroup_rows AS SELECT * FROM (VALUES
+    ('us-east-1', 'primary', 'arn:aws:athena:us-east-1:123456789012:workgroup/primary', 'ENABLED', 'Athena engine version 3', NULL),
+    ('us-east-1', 'analytics', 'arn:aws:athena:us-east-1:123456789012:workgroup/analytics', 'DISABLED', 'Athena engine version 3', NULL),
+    ('eu-west-3', NULL, NULL, NULL, NULL, 'Athena ListWorkGroups failed in region ''eu-west-3'': AccessDeniedException - denied')
+) t(region, workgroup_name, arn, state, engine_version, error);
+
+statement ok
+CREATE MACRO athena_workgroups(region := NULL, secret := NULL, workgroup := NULL) AS TABLE
+SELECT w.* FROM workgroup_rows w WHERE (region IS NULL OR w.region = region) AND (workgroup IS NULL OR w.workgroup_name = workgroup);
+
+query IIII
+SELECT name, reference, state, handle FROM __aws__athena__workgroup__list(MAP {}::MAP(VARCHAR, VARCHAR));
+----
+analytics	arn:aws:athena:us-east-1:123456789012:workgroup/analytics	disabled	{arn='arn:aws:athena:us-east-1:123456789012:workgroup/analytics'}
+primary	arn:aws:athena:us-east-1:123456789012:workgroup/primary	ready	{arn='arn:aws:athena:us-east-1:123456789012:workgroup/primary'}
+
+query IIIII
+SELECT name, type, managed, state, reference FROM (SHOW ALL EXTERNAL RESOURCES WITH TYPE 'aws.athena.workgroup');
+----
+analytics	aws.athena.workgroup	false	disabled	arn:aws:athena:us-east-1:123456789012:workgroup/analytics
+primary	aws.athena.workgroup	false	ready	arn:aws:athena:us-east-1:123456789012:workgroup/primary
+
+query II
+SELECT state, result FROM __aws__athena__workgroup__status(MAP {'arn': 'arn:aws:athena:us-east-1:123456789012:workgroup/analytics'});
+----
+ready	{uri='arn:aws:athena:us-east-1:123456789012:workgroup/analytics', attached_db_type=arn}
+
+query II
+SELECT state, result FROM __aws__athena__workgroup__status(MAP {'arn': 'arn:aws:athena:us-east-1:123456789012:workgroup/analytics', 'secret': 'example_credentials'});
+----
+ready	{uri='arn:aws:athena:us-east-1:123456789012:workgroup/analytics', attached_db_type=arn, secret=example_credentials}
+
+statement error
+SELECT * FROM __aws__athena__workgroup__status(MAP {'arn': 'arn:aws:athena:US-EAST-1:123456789012:workgroup/analytics'});
+----
+is not this workgroup's ARN as the credentials see it, 'arn:aws:athena:us-east-1:123456789012:workgroup/analytics'
+
+statement ok
+REGISTER EXTERNAL RESOURCE 'aws.athena.workgroup' AS wg
+FROM MAP {'arn': 'arn:aws:athena:us-east-1:123456789012:workgroup/primary'};
+
+query IIII
+SELECT name, managed, uri, attached_db_type
+FROM duckdb_external_resources(discover := true, type := 'aws.athena.workgroup') ORDER BY name;
+----
+analytics	false	NULL	NULL
+wg	true	arn:aws:athena:us-east-1:123456789012:workgroup/primary	arn
+
+statement error
+REGISTER EXTERNAL RESOURCE 'aws.athena.workgroup' AS gone
+FROM MAP {'arn': 'arn:aws:athena:us-east-1:123456789012:workgroup/gone'};
+----
+no workgroup with ARN
+
+statement error
+REGISTER EXTERNAL RESOURCE 'aws.athena.workgroup' AS elsewhere
+FROM MAP {'arn': 'arn:aws:athena:us-east-1:999999999999:workgroup/primary'};
+----
+is not this workgroup's ARN as the credentials see it, 'arn:aws:athena:us-east-1:123456789012:workgroup/primary'
+
+
+statement error
+ATTACH TO EXTERNAL RESOURCE wg AS ath;
+----
+the 'athena' storage type is required to attach 'arn:aws:athena:us-east-1:123456789012:workgroup/primary'
+
+statement error
+ATTACH 'arn:aws:athena:us-east-1:123456789012:workgroup/primary' AS ath;
+----
+the 'athena' storage type is required to attach 'arn:aws:athena:us-east-1:123456789012:workgroup/primary'
+
+statement error
+ATTACH 'arn:aws:athena:us-east-1:123456789012:datacatalog/AwsDataCatalog' AS dc;
+----
+the 'athena' storage type is required to attach 'arn:aws:athena:us-east-1:123456789012:datacatalog/AwsDataCatalog'
+
+statement ok
+DESTROY EXTERNAL RESOURCE wg;
+
+query I
+SELECT count(*) FROM duckdb_external_resources();
+----
+0
+
+statement ok
+SET enable_external_access = false;
+
+statement error
+EXECUTE list_workgroups;
+----
+athena_workgroups: listing Athena workgroups is disabled through configuration

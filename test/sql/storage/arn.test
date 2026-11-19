@@ -31,7 +31,7 @@ Invalid Input Error: Invalid PARTITION Section of ARN: ''
 statement error
 ATTACH 'arn:aws::::' as db;
 ----
-Not implemented Error: ATTACH of AWS ARN service '' is not supported. Supported options are: rds, redshift, redshift-serverless, s3tables
+Not implemented Error: ATTACH of AWS ARN service '' is not supported. Supported options are: athena, rds, redshift, redshift-serverless, s3tables
 
 # RDS dispatch only accepts DB instance ARNs, and the ARN owns its region.
 statement error

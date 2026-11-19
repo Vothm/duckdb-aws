@@ -1,0 +1,59 @@
+# name: test/sql/athena/athena_resource_aws.test
+# description: athena_workgroups and the aws.athena.workgroup type against a workgroup of the account; read-only
+# group: [athena]
+
+require aws
+
+require httpfs
+
+require-env AWS_ACCESS_KEY_ID
+
+require-env AWS_SECRET_ACCESS_KEY
+
+require-env AWS_REGION
+
+require-env AWS_ATHENA_WORKGROUP_NAME
+
+require-env AWS_ATHENA_WORKGROUP_ARN
+
+statement ok
+CREATE SECRET athena_resource_credentials (TYPE aws, PROVIDER credential_chain, CHAIN 'env', REGION '{AWS_REGION}');
+
+query III
+SELECT arn, state, error
+FROM athena_workgroups(region := '{AWS_REGION}') WHERE workgroup_name = '{AWS_ATHENA_WORKGROUP_NAME}';
+----
+{AWS_ATHENA_WORKGROUP_ARN}	ENABLED	NULL
+
+query IIII
+SELECT workgroup_name, state, engine_version IS NOT NULL, error
+FROM athena_workgroups(region := '{AWS_REGION}', workgroup := '{AWS_ATHENA_WORKGROUP_NAME}');
+----
+{AWS_ATHENA_WORKGROUP_NAME}	ENABLED	true	NULL
+
+query I
+SELECT count(*) > 0 AND count(*) = count(error) FROM athena_workgroups(workgroup := 'duckdb-no-such-workgroup');
+----
+true
+
+query II
+SELECT name, state FROM (SHOW ALL EXTERNAL RESOURCES WITH TYPE 'aws.athena.workgroup')
+WHERE reference = '{AWS_ATHENA_WORKGROUP_ARN}';
+----
+{AWS_ATHENA_WORKGROUP_NAME}	ready
+
+statement error
+REGISTER EXTERNAL RESOURCE 'aws.athena.workgroup' AS gone FROM MAP {'arn': 'arn:aws:athena:{AWS_REGION}:123456789012:workgroup/duckdb-no-such-workgroup'};
+----
+Athena GetWorkGroup failed in region
+
+statement ok
+REGISTER EXTERNAL RESOURCE 'aws.athena.workgroup' AS test_workgroup FROM MAP {'arn': '{AWS_ATHENA_WORKGROUP_ARN}'};
+
+query II
+SELECT uri, attached_db_type FROM duckdb_external_resources() WHERE name = 'test_workgroup';
+----
+{AWS_ATHENA_WORKGROUP_ARN}	arn
+
+statement ok
+DESTROY EXTERNAL RESOURCE test_workgroup;

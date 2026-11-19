@@ -474,6 +474,7 @@ type directly instead.
 | `arn:aws:rds:<region>:<account>:db:<instance-id>` | `rds`, this extension's RDS-over-Postgres attach | |
 | `arn:aws:redshift:<region>:<account>:namespace:<id>` | `redshift`, the redshift extension from aws.amazon.com | `TYPE redshift_postgres` |
 | `arn:aws:redshift-serverless:<region>:<account>:workgroup/<id>` or `namespace/<id>` | `redshift` | `TYPE redshift_postgres` |
+| `arn:aws:athena:<region>:<account>:workgroup/<name>` | `athena`, the athena extension, loaded by hand, once it takes a workgroup ARN as its path; it accepts `Region` and `WorkGroup` options that agree with the ARN | |
 
 `TYPE redshift` is served by the extension that `aws.amazon.com` publishes: it has to be installed from there first
 (`CREATE EXTENSION REPOSITORY aws.amazon.com; INSTALL redshift FROM aws.amazon.com;`), and is loaded on first use; an
@@ -487,6 +488,40 @@ region with the secret `SECRET` names (or, without `SECRET`, the AWS secret it w
 `redshift` type the path `redshift://<endpoint>:<port>`, adding `SECRET` naming that secret when none was given, and
 `DATABASE` naming the target's default database when neither `DATABASE` nor `DBNAME` was given, so that a database
 given there wins. The other ATTACH options are passed on as given; the redshift extension decides which it takes.
+
+## Athena workgroups
+
+Athena workgroups are the external resource type `aws.athena.workgroup`. They are listed, not created: the reference
+shown is the workgroup ARN `ATTACH` takes, and attaching goes through the athena extension as
+[above](#attaching-aws-resources-by-arn): it needs an athena extension that takes a workgroup ARN as its path and
+reads the region and the workgroup off it.
+
+```sql
+SHOW ALL EXTERNAL RESOURCES WITH TYPE 'aws.athena.workgroup';
+ATTACH 'arn:aws:athena:us-east-1:123456789012:workgroup/primary' AS ath;
+
+REGISTER EXTERNAL RESOURCE 'aws.athena.workgroup' AS analytics
+    FROM MAP {'arn': 'arn:aws:athena:us-east-1:123456789012:workgroup/analytics'};
+ATTACH TO EXTERNAL RESOURCE analytics AS an;
+DESTROY EXTERNAL RESOURCE analytics;   -- forgets the registration and detaches an; the workgroup is left as it is
+
+FROM athena_workgroups(region := 'us-east-1');   -- without region, every default region; workgroup := '<name>' looks one up there
+```
+
+`SHOW ALL EXTERNAL RESOURCES` lists what the default-region sweep could read: a region that fails (denied, for
+example) is left out, and `FROM athena_workgroups()` shows each failing region's error. Opt-in regions are listed only
+with `region :=`. A workgroup is `ready` while it is enabled, otherwise its state in lower case; Spark workgroups are
+listed too, with their engine in `engine_version`, and cannot run SQL. Athena reports no workgroup ARN, so the listing
+builds it from the caller's identity (`sts:GetCallerIdentity`, once per region). Listing needs
+`athena:ListWorkGroups`, a list call with no resource to scope to, so grant it on Resource `*`. `REGISTER` looks the
+ARN's workgroup up with `athena:GetWorkGroup` in the ARN's region (plus `sts:GetCallerIdentity`), refuses an ARN of
+another account or partition, and reports `ready` for any workgroup it finds, a disabled one included: the athena
+extension refuses to attach a disabled workgroup, and a Spark one attaches but cannot run SQL. Only `REGISTER` checks the account: `ATTACH '<arn>'` hands the ARN to the athena
+extension, which addresses the workgroup by name in the caller's account. `REGISTER` uses the single AWS secret or the
+default credential chain; with several AWS secrets, name one in the handle, `FROM MAP {'arn': '<arn>', 'secret':
+'<name>'}`, and `ATTACH TO EXTERNAL RESOURCE` passes it on as the `SECRET` option (as `ATTACH '<arn>' AS ath (SECRET
+<name>)` does). The athena extension is not published in an extension repository yet, so it is not loaded on first
+use: an ATTACH without it fails saying the `athena` storage type is required.
 
 ## AWS system tables
 
@@ -647,6 +682,8 @@ Signatures:
 ## Tests
 
 - [Redshift test setup](test/sql/redshift/README.md)
+- `test/sql/athena/athena_resource_aws.test` needs `AWS_REGION`, `AWS_ATHENA_WORKGROUP_NAME` and
+  `AWS_ATHENA_WORKGROUP_ARN` (any enabled workgroup of the account) next to the credential variables; it only reads.
 
 ## Documentation
 
